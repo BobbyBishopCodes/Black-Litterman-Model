@@ -14,6 +14,9 @@ These link(s) are sources I will be utilizing throughout the creation of this pr
 1: https://www.investopedia.com/terms/b/black-litterman_model.asp
 
 2: https://www.fe.training/free-resources/portfolio-management/black-litterman-model/
+
+3: https://people.duke.edu/~charvey/Teaching/BA453_2006/Idzorek_onBL.pdf
 ```
+Ps. We acknowledge there are libraries that already provide similar outputs and applications of Black-Litterman however for various reasons we still decided to create with our own..
 
 **Personal Todo:**
