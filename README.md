@@ -1,6 +1,7 @@
 ## Black-Litterman-Model 
 Code & Algorithmic Implementation by Robert Bishop, Accounting & Finance @ ETSU \
 Mathematics coordinated with Riley Murray, Mathematics & Economics @ ETSU 
+Last Updated: 10/4/2026
 
 **Intentionality:** \
 Developing a Black-Litterman Model prototype for the Citizens Bank Fund to dynamically analyze the portfolio's positions in coordination with my other repository citizensbankfund.com...
