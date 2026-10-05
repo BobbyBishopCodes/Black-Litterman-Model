@@ -1,5 +1,5 @@
 ## Black-Litterman-Model 
-Created by Robert Bishop, Accounting & Finance @ ETSU \
+Coded & Algorithmic Implementation by Robert Bishop, Accounting & Finance @ ETSU \
 Mathematics coordinated with Riley Murray, Mathematics & Economics @ ETSU 
 
 **Intentionality:** \
