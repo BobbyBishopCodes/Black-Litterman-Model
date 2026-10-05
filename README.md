@@ -1,5 +1,5 @@
 ## Black-Litterman-Model 
-Coded & Algorithmic Implementation by Robert Bishop, Accounting & Finance @ ETSU \
+Code & Algorithmic Implementation by Robert Bishop, Accounting & Finance @ ETSU \
 Mathematics coordinated with Riley Murray, Mathematics & Economics @ ETSU 
 
 **Intentionality:** \
