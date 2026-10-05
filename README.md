@@ -1,6 +1,7 @@
-## Black-Litterman-Model 
+## Black-Litterman-Model
+
 Code & Algorithmic Implementation by Robert Bishop, Accounting & Finance @ ETSU \
-Mathematics coordinated with Riley Murray, Mathematics & Economics @ ETSU 
+Mathematics coordinated with Riley Murray, Mathematics & Economics @ ETSU
 Last Updated: 10/4/2026
 
 **Intentionality:** \
@@ -10,6 +11,7 @@ This project itself will not inherently be dynamic, will use a list of equities 
 
 **Sources:** \
 These link(s) are sources I will be utilizing throughout the creation of this project, to try and make sense of the math and apply it to our specific need...
+
 ```
 1: https://www.investopedia.com/terms/b/black-litterman_model.asp
 
@@ -17,6 +19,7 @@ These link(s) are sources I will be utilizing throughout the creation of this pr
 
 3: https://people.duke.edu/~charvey/Teaching/BA453_2006/Idzorek_onBL.pdf
 ```
+
 Ps. We acknowledge there are libraries that already provide similar outputs and applications of Black-Litterman however for various reasons we still decided to create with our own..
 
 **Personal Todo:**
