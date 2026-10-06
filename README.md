@@ -30,4 +30,5 @@ Ps. We acknowledge there are libraries that already provide similar outputs and 
 - Algorithmic Implementation
 - Outside Ticker Input
 - 4 Required Inputs
+- Need to implement the Hard Caps, 5% Cash, 20% Bonds, 8% Commodities, 8% International, 59% Equities
 ```
