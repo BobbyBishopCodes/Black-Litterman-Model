@@ -7,7 +7,44 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Write};
 
+mod allocation;
 mod yahoo;
+
+use allocation::{AssetClass, Caps, Constraints};
+
+// If u want to u can change the allocation values here
+// Refer to the top of allocations.rs for a explanation of what this is
+const ALLOCATION_CAPS: Caps = Caps {
+    cash: 0.05,
+    bonds: 0.20,
+    commodities: 0.08,
+    international: 0.08,
+    equities: 0.59,
+};
+
+const HOLDING_CLASSES: &[(&str, AssetClass)] = &[
+    ("BINC", AssetClass::Bonds),
+    ("IEF", AssetClass::Bonds),
+    ("HYG", AssetClass::Bonds),
+    ("VGSH", AssetClass::Bonds),
+    ("GLD", AssetClass::Commodities),
+    ("EWJ", AssetClass::International),
+    ("INDA", AssetClass::International),
+    ("BMY", AssetClass::Equities),
+    ("COF", AssetClass::Equities),
+    ("CI", AssetClass::Equities),
+    ("CSCO", AssetClass::Equities),
+    ("GE", AssetClass::Equities),
+    ("QQQM", AssetClass::Equities),
+    ("SPHD", AssetClass::Equities),
+    ("MSFT", AssetClass::Equities),
+    ("PG", AssetClass::Equities),
+    ("XLE", AssetClass::Equities),
+    ("TTWO", AssetClass::Equities),
+    ("U", AssetClass::Equities),
+    ("VDC", AssetClass::Equities),
+    ("VOO", AssetClass::Equities),
+];
 
 const HOLDINGS: &str = include_str!("../data/holdings.json");
 const INPUT_ERROR: &str = "Error 1: input";
@@ -51,10 +88,13 @@ struct Asset {
     symbol: String,
     current_price: f64,
     equilibrium_weight: f64,
+    #[serde(default)]
+    asset_class: Option<AssetClass>,
 }
 
 struct View {
     ticker: String,
+    asset_class: Option<AssetClass>,
     candidate_price: Option<f64>,
     target_price: f64,
     months: f64,
@@ -119,6 +159,7 @@ fn demo_model(snapshot: &Snapshot) -> Result<Model, String> {
                 symbol,
                 current_price,
                 equilibrium_weight: p.reference_value_cents as f64 / total as f64,
+                asset_class: None,
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -187,6 +228,7 @@ fn yahoo_model(snapshot: &mut Snapshot, view_ticker: &str) -> Result<Model, Stri
             symbol: symbol.clone(),
             current_price: market.prices[i],
             equilibrium_weight: *values.get(symbol).unwrap_or(&0) as f64 / total as f64,
+            asset_class: None,
         })
         .collect();
     Ok(Model {
@@ -216,6 +258,7 @@ fn add_demo_candidate(model: &mut Model, symbol: String, price: f64) {
         symbol,
         current_price: price,
         equilibrium_weight: 0.0,
+        asset_class: None,
     });
     model.source.push_str(
         "; candidate price supplied by user, with zero prior weight and invented covariance",
@@ -311,48 +354,25 @@ fn equilibrium(model: &Model) -> (f64, Vec<f64>) {
     (lambda, sigma_w.into_iter().map(|v| lambda * v).collect())
 }
 
-fn project_simplex(values: &[f64]) -> Vec<f64> {
-    let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| b.total_cmp(a));
-    let mut cumulative = 0.0;
-    let mut threshold = 0.0;
-    for (i, value) in sorted.iter().enumerate() {
-        cumulative += value;
-        let candidate = (cumulative - 1.0) / (i + 1) as f64;
-        if *value > candidate {
-            threshold = candidate;
-        }
-    }
-    values.iter().map(|v| (v - threshold).max(0.0)).collect()
-}
-
-// Long-only, fully invested mean-variance allocation after the BL return update.
-fn optimize(mu: &[f64], covariance: &[Vec<f64>], lambda: f64) -> Result<Vec<f64>, String> {
-    let n = mu.len();
-    let mut weights = vec![1.0 / n as f64; n];
-    let bound = covariance
+fn allocation_constraints(model: &Model) -> Result<Constraints, String> {
+    let classes = model
+        .assets
         .iter()
-        .map(|row| row.iter().map(|v| v.abs()).sum::<f64>())
-        .fold(0.0_f64, f64::max);
-    let step = 1.0 / (lambda * bound);
-    for _ in 0..200_000 {
-        let sigma_w = multiply(covariance, &weights);
-        let moved: Vec<f64> = (0..n)
-            .map(|i| weights[i] + step * (mu[i] - lambda * sigma_w[i]))
-            .collect();
-        let next = project_simplex(&moved);
-        let distance = next
-            .iter()
-            .zip(&weights)
-            .map(|(a, b)| (a - b).powi(2))
-            .sum::<f64>()
-            .sqrt();
-        weights = next;
-        if distance < 1e-11 {
-            return Ok(weights);
-        }
-    }
-    Err("Optimizer did not converge".into())
+        .map(|asset| {
+            let configured = HOLDING_CLASSES
+                .iter()
+                .find_map(|(symbol, class)| (*symbol == asset.symbol).then_some(*class));
+            if let (Some(known), Some(supplied)) = (configured, asset.asset_class)
+                && known != supplied
+            {
+                return Err(format!("Conflicting asset class for {}", asset.symbol));
+            }
+            configured
+                .or(asset.asset_class)
+                .ok_or_else(|| format!("Asset {} requires an asset class", asset.symbol))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Constraints::new(classes, ALLOCATION_CAPS)
 }
 
 fn target_excess(view: &View, price: f64, risk_free: f64) -> f64 {
@@ -361,7 +381,7 @@ fn target_excess(view: &View, price: f64, risk_free: f64) -> f64 {
 
 // Single absolute view P selects asset k. This Omega makes C the fraction of
 // the full-confidence *unconstrained* tilt (Idzorek section 3). The long-only
-// the uhh allocation below can change that fraction when a constraint binds.
+// class constraints below can change that fraction when a constraint binds.
 fn scenario(
     model: &Model,
     k: usize,
@@ -383,7 +403,8 @@ fn scenario(
             base + confidence * model.annual_covariance[i][k] / variance * (q - prior[k])
         })
         .collect::<Vec<_>>();
-    let weights = optimize(&posterior, &model.annual_covariance, lambda)?;
+    let constraints = allocation_constraints(model)?;
+    let weights = allocation::optimize(&posterior, &model.annual_covariance, lambda, &constraints)?;
     Ok(Scenario {
         confidence,
         omega,
@@ -416,13 +437,23 @@ fn argument(
     }
 }
 
+fn parse_asset_class(value: &str) -> Result<AssetClass, &'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "bonds" => Ok(AssetClass::Bonds),
+        "commodities" => Ok(AssetClass::Commodities),
+        "international" => Ok(AssetClass::International),
+        "equities" => Ok(AssetClass::Equities),
+        _ => Err(INPUT_ERROR),
+    }
+}
+
 fn input(args: &[String], allow_prompts: bool) -> Result<View, &'static str> {
     let mut values = HashMap::new();
     for chunk in args.chunks(2) {
         if chunk.len() != 2
             || !matches!(
                 chunk[0].as_str(),
-                "--ticker" | "--price" | "--target" | "--months" | "--confidence"
+                "--ticker" | "--price" | "--target" | "--months" | "--confidence" | "--asset-class"
             )
         {
             return Err(INPUT_ERROR);
@@ -432,6 +463,10 @@ fn input(args: &[String], allow_prompts: bool) -> Result<View, &'static str> {
         }
     }
     let ticker = argument(&values, "--ticker", "Ticker", allow_prompts)?.to_uppercase();
+    let asset_class = values
+        .get("--asset-class")
+        .map(|value| parse_asset_class(value))
+        .transpose()?;
     let candidate_price = values
         .get("--price")
         .map(|value| value.parse::<f64>().map_err(|_| INPUT_ERROR))
@@ -463,6 +498,7 @@ fn input(args: &[String], allow_prompts: bool) -> Result<View, &'static str> {
     }
     Ok(View {
         ticker,
+        asset_class,
         candidate_price,
         target_price,
         months,
@@ -477,10 +513,14 @@ fn run() -> Result<(), &'static str> {
             "Usage: cargo run -- --yahoo --ticker MSFT --target 600 --months 12 --confidence 50"
         );
         println!(
-            "   or: cargo run -- --demo [--ticker XYZ --price 100 --target 120 --months 12 --confidence 50]"
+            "   or: cargo run -- --demo [--ticker XYZ --asset-class equities --price 100 --target 120 --months 12 --confidence 50]"
         );
         println!("   or: cargo run -- --model PATH [same optional view arguments]");
         println!("--demo uses Yahoo unless --price is supplied for an offline example.");
+        println!(
+            "New tickers require --asset-class bonds|commodities|international|equities, or assetClass in model JSON."
+        );
+        println!("--demo prompts for the asset class when a new ticker needs one.");
         return Ok(());
     }
     let mut snapshot = load_holdings().map_err(|_| DATA_ERROR)?;
@@ -493,8 +533,38 @@ fn run() -> Result<(), &'static str> {
     } else {
         return Err(INPUT_ERROR);
     };
-    let view = input(view_args, !yahoo)?;
+    let mut view = input(view_args, !yahoo)?;
+    if demo
+        && view.asset_class.is_none()
+        && !HOLDING_CLASSES
+            .iter()
+            .any(|(symbol, _)| *symbol == view.ticker)
+    {
+        view.asset_class = Some(parse_asset_class(&prompt(
+            "Asset class (bonds, commodities, international, equities)",
+        )?)?);
+    }
     if yahoo && view.candidate_price.is_some() {
+        return Err(INPUT_ERROR);
+    }
+    if let Some(class) = view.asset_class
+        && HOLDING_CLASSES
+            .iter()
+            .any(|(symbol, known)| *symbol == view.ticker && *known != class)
+    {
+        eprintln!(
+            "Asset class conflicts with HOLDING_CLASSES for {}.",
+            view.ticker
+        );
+        return Err(INPUT_ERROR);
+    }
+    if (demo || yahoo)
+        && !HOLDING_CLASSES
+            .iter()
+            .any(|(symbol, _)| *symbol == view.ticker)
+        && view.asset_class.is_none()
+    {
+        eprintln!("New tickers require --asset-class bonds|commodities|international|equities.");
         return Err(INPUT_ERROR);
     }
     let live = yahoo || (demo && view.candidate_price.is_none());
@@ -536,8 +606,26 @@ fn run() -> Result<(), &'static str> {
         .iter()
         .position(|a| a.symbol == view.ticker)
         .ok_or(INPUT_ERROR)?;
+    if let Some(class) = view.asset_class {
+        let asset = &mut model.assets[k];
+        if asset.asset_class.is_some_and(|existing| existing != class) {
+            return Err(INPUT_ERROR);
+        }
+        asset.asset_class = Some(class);
+    }
+    let constraints = allocation_constraints(&model).map_err(|message| {
+        eprintln!("{message}");
+        DATA_ERROR
+    })?;
     let current = invested_values(&snapshot).map_err(|_| DATA_ERROR)?;
-    let budget: i64 = current.values().sum();
+    let invested_budget: i64 = current.values().sum();
+    let cash: i64 = snapshot
+        .positions
+        .iter()
+        .filter(|p| p.asset_type == "cash")
+        .map(|p| p.reference_value_cents)
+        .sum();
+    let budget = invested_budget.checked_add(cash).ok_or(DATA_ERROR)?;
     let price = model.assets[k].current_price;
     let q = target_excess(&view, price, model.risk_free_rate);
     if !q.is_finite() {
@@ -560,7 +648,7 @@ fn run() -> Result<(), &'static str> {
     );
     println!("Source: {}", model.source);
     println!(
-        "Invested budget USD {:.2}; cash excluded.",
+        "Total portfolio budget USD {:.2}; cash included in allocation targets.",
         budget as f64 / 100.0
     );
     println!(
@@ -584,6 +672,11 @@ fn run() -> Result<(), &'static str> {
         view.ticker,
         prior[k] * 100.0
     );
+    println!("Cash modeled at the risk-free rate with zero excess return and zero covariance.");
+    println!(
+        "Equilibrium proxy remains normalized invested holdings; caps constrain the final allocation."
+    );
+    println!("Caps sum to 100%, so full allocation requires each class budget exactly.");
     println!("\nConfidence sensitivity (not statistical confidence intervals):");
     println!(
         "Confidence | View omega | Posterior excess | Target weight | Target USD | Change USD"
@@ -601,6 +694,38 @@ fn run() -> Result<(), &'static str> {
             dollars - old
         );
     }
+    println!("\nSelected confidence allocation (percent of total portfolio):");
+    println!("Class         | Hard cap | Target weight | Target USD | Change USD");
+    let cash_target = constraints.caps.cash * budget as f64 / 100.0;
+    println!(
+        "{:13} | {:>7.2}% | {:>12.2}% | {:>10.2} | {:>+10.2}",
+        "Cash",
+        constraints.caps.cash * 100.0,
+        constraints.caps.cash * 100.0,
+        cash_target,
+        cash_target - cash as f64 / 100.0
+    );
+    for class in AssetClass::ALL {
+        let weight = constraints.total(&cases[1].weights, class);
+        let old: i64 = model
+            .assets
+            .iter()
+            .zip(&constraints.classes)
+            .filter(|(_, c)| **c == class)
+            .map(|(asset, _)| *current.get(&asset.symbol).unwrap_or(&0))
+            .sum();
+        let dollars = weight * budget as f64 / 100.0;
+        println!(
+            "{:13} | {:>7.2}% | {:>12.2}% | {:>10.2} | {:>+10.2}",
+            class.label(),
+            constraints.caps.limit(class) * 100.0,
+            weight * 100.0,
+            dollars,
+            dollars - old as f64 / 100.0
+        );
+    }
+    let total_weight = cases[1].weights.iter().sum::<f64>() + constraints.caps.cash;
+    println!("Total allocation: {:.6}%", total_weight * 100.0);
     let mut changes: Vec<(&str, f64)> = model
         .assets
         .iter()
@@ -613,6 +738,7 @@ fn run() -> Result<(), &'static str> {
             )
         })
         .collect();
+    changes.push(("CASH", cash_target - cash as f64 / 100.0));
     changes.sort_by(|a, b| a.1.total_cmp(&b.1));
     println!("\nLargest modeled reductions from current holdings:");
     for (symbol, change) in changes.iter().filter(|(_, change)| *change < -0.005) {
@@ -637,12 +763,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn zero_confidence_recovers_prior_weights() {
+    fn asset_class_input_accepts_only_supported_buckets() {
+        for (text, expected) in [
+            ("bonds", AssetClass::Bonds),
+            ("commodities", AssetClass::Commodities),
+            ("international", AssetClass::International),
+            (" Equities ", AssetClass::Equities),
+        ] {
+            assert_eq!(parse_asset_class(text).unwrap(), expected);
+        }
+        assert!(parse_asset_class("stock").is_err());
+        assert!(parse_asset_class("cash").is_err());
+        assert!(parse_asset_class("").is_err());
+    }
+
+    #[test]
+    fn zero_confidence_keeps_prior_returns_and_obeys_caps() {
         let model = demo_model(&load_holdings().unwrap()).unwrap();
         let (lambda, prior) = equilibrium(&model);
         let result = scenario(&model, 0, prior[0] + 0.10, 0.0, lambda, &prior).unwrap();
-        for (asset, weight) in model.assets.iter().zip(result.weights) {
-            assert!((asset.equilibrium_weight - weight).abs() < 1e-7);
+        assert_eq!(result.posterior, prior);
+        let constraints = allocation_constraints(&model).unwrap();
+        for class in AssetClass::ALL {
+            assert!(
+                (constraints.total(&result.weights, class) - ALLOCATION_CAPS.limit(class)).abs()
+                    < 1e-9
+            );
         }
     }
 
@@ -655,7 +801,71 @@ mod tests {
         assert!((half.posterior[0] - prior[0] - 0.05).abs() < 1e-12);
         assert!((full.posterior[0] - prior[0] - 0.10).abs() < 1e-12);
         assert!((half.omega - model.tau * model.annual_covariance[0][0]).abs() < 1e-12);
-        assert!((half.weights.iter().sum::<f64>() - 1.0).abs() < 1e-9);
+        assert!((half.weights.iter().sum::<f64>() + ALLOCATION_CAPS.cash - 1.0).abs() < 1e-9);
         assert!(half.weights.iter().all(|v| *v >= 0.0));
+    }
+
+    #[test]
+    fn candidates_require_an_unambiguous_class() {
+        let mut model = demo_model(&load_holdings().unwrap()).unwrap();
+        add_demo_candidate(&mut model, "NEW".into(), 100.0);
+        assert!(allocation_constraints(&model).is_err());
+        model.assets.last_mut().unwrap().asset_class = Some(AssetClass::International);
+        let constraints = allocation_constraints(&model).unwrap();
+        assert_eq!(constraints.classes.last(), Some(&AssetClass::International));
+        model.assets[0].asset_class = Some(AssetClass::Bonds);
+        assert!(allocation_constraints(&model).is_err());
+    }
+
+    #[test]
+    fn all_confidences_obey_caps_stationarity_and_reconcile_nav() {
+        let snapshot = load_holdings().unwrap();
+        let model = demo_model(&snapshot).unwrap();
+        let constraints = allocation_constraints(&model).unwrap();
+        let current = invested_values(&snapshot).unwrap();
+        let cash: i64 = snapshot
+            .positions
+            .iter()
+            .filter(|p| p.asset_type == "cash")
+            .map(|p| p.reference_value_cents)
+            .sum();
+        let nav = (current.values().sum::<i64>() + cash) as f64;
+        let (lambda, prior) = equilibrium(&model);
+        for confidence in [0.0, 0.5, 1.0] {
+            let result = scenario(&model, 0, 2.0, confidence, lambda, &prior).unwrap();
+            let sigma_w = multiply(&model.annual_covariance, &result.weights);
+            let gradient: Vec<f64> = result
+                .posterior
+                .iter()
+                .zip(sigma_w)
+                .map(|(mu, risk)| mu - lambda * risk)
+                .collect();
+            for class in AssetClass::ALL {
+                assert!(
+                    (constraints.total(&result.weights, class) - ALLOCATION_CAPS.limit(class))
+                        .abs()
+                        < 1e-9
+                );
+                let maximum = gradient
+                    .iter()
+                    .zip(&constraints.classes)
+                    .filter_map(|(g, c)| (*c == class).then_some(*g))
+                    .fold(f64::NEG_INFINITY, f64::max);
+                for (i, assigned) in constraints.classes.iter().enumerate() {
+                    if *assigned == class && result.weights[i] > 1e-8 {
+                        assert!((gradient[i] - maximum).abs() < 1e-7);
+                    }
+                }
+            }
+            let changes = model
+                .assets
+                .iter()
+                .zip(&result.weights)
+                .map(|(asset, w)| w * nav - *current.get(&asset.symbol).unwrap_or(&0) as f64)
+                .sum::<f64>()
+                + ALLOCATION_CAPS.cash * nav
+                - cash as f64;
+            assert!(changes.abs() < 0.001);
+        }
     }
 }
