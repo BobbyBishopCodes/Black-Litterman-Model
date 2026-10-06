@@ -9,6 +9,8 @@ Developing a Black-Litterman Model prototype for the Citizens Bank Fund to dynam
 
 This project itself will not inherently be dynamic, will use a list of equities and various other non-deployment stage components to achieve a working prototype which will then be implemented into the website.
 
+This project, will  need some updating especially in terms of dynamic data use, for the CBF we used Clouflare work agents, yahoo finance and finnhub apis.. Just keep that in mind for any real application.
+
 **Sources:** \
 These link(s) are sources I will be utilizing throughout the creation of this project, to try and make sense of the math and apply it to our specific need...
 
