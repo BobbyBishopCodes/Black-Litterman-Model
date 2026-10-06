@@ -23,3 +23,11 @@ These link(s) are sources I will be utilizing throughout the creation of this pr
 Ps. We acknowledge there are libraries that already provide similar outputs and applications of Black-Litterman however for various reasons we still decided to create with our own..
 
 **Personal Todo:**
+
+```
+- Exportable CSV, of BL Outputs
+- Table & Matrix Display
+- Algorithmic Implementation
+- Outside Ticker Input
+- 4 Required Inputs
+```
