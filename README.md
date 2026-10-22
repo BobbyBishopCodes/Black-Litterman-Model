@@ -6,7 +6,7 @@ Last Updated: 10/4/2026
 *Outdated as of October 4*
 
 **Intentionality:** \
-Developing a Black-Litterman Model prototype for the Citizens Bank Fund to dynamically analyze the portfolio's positions in coordination with my other repository citizensbankfund.com....
+Developing a Black-Litterman Model prototype for the Citizens Bank Fund to dynamically analyze the portfolio's positions in coordination with my other repository citizensbankfund.com.....
 
 This project itself will not inherently be dynamic, will use a list of equities and various other non-deployment stage components to achieve a working prototype which will then be implemented into the website.
 
